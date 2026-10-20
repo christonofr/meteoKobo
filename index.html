@@ -28,6 +28,7 @@
   .grille .gros { font-size: 28px; font-weight: bold; }
   .grille .petit { font-size: 16px; }
   .erreur { font-size: 22px; border: 3px solid #000; padding: 12px; }
+  .pied { font-size: 15px; margin-top: 14px; color: #333; }
 </style>
 </head>
 <body>
@@ -121,15 +122,29 @@ function requete(url, ok, ko) {
 }
 
 function afficherErreur(msg) {
+  planifier(5);
   document.getElementById("contenu").innerHTML =
     '<h1>' + REGLAGES.nom + '</h1><hr>' +
     '<div class="erreur">Météo indisponible : ' + msg +
-    '<br>Nouvel essai dans 5 minutes.</div>';
-  planifier(5);
+    '<br>Nouvel essai dans 5 minutes.</div>' + piedDePage();
+}
+
+// Diagnostic : nombre de chargements depuis l'ouverture de la page
+var compteur = 0;
+var prochain = null;
+
+function horloge(d) { return deux(d.getHours()) + 'h' + deux(d.getMinutes()); }
+
+function piedDePage() {
+  return '<p class="pied">Vérifié à ' + horloge(new Date()) + ' (n°' + compteur + ')' +
+         (prochain ? ' · prochain essai vers ' + horloge(prochain) : '') +
+         (MODE_TEST ? ' · <b>MODE TEST</b> · horloge : <span id="tic">' + horloge(new Date()) + '</span>' : '') +
+         '</p>';
 }
 
 function planifier(minutes) {
   if (window._minuteur) clearTimeout(window._minuteur);
+  prochain = new Date(new Date().getTime() + minutes * 60 * 1000);
   window._minuteur = setTimeout(charger, minutes * 60 * 1000);
 }
 
@@ -194,8 +209,8 @@ function afficher(d) {
   for (k = 1; k < j.time.length; k++) html += '<td class="petit">' + (j.precipitation_probability_max[k] || 0) + ' %</td>';
   html += '</tr></table>';
 
-  document.getElementById("contenu").innerHTML = html;
   planifier(REGLAGES.rafraichissementMinutes);
+  document.getElementById("contenu").innerHTML = html + piedDePage();
 }
 
 function heure(iso) { var t = decoupe(iso); return deux(t.h) + 'h' + deux(t.min); }
@@ -212,6 +227,7 @@ function chargerMeteo() {
 }
 
 function charger() {
+  compteur++;
   var ville = param("ville");
   if (param("lat") && param("lon")) {
     REGLAGES.lat = parseFloat(param("lat"));
@@ -233,6 +249,17 @@ function charger() {
   } else {
     chargerMeteo();
   }
+}
+
+// Mode test (?test=1) : mise à jour toutes les 2 minutes et horloge qui avance chaque minute,
+// pour vérifier que la Kobo exécute bien les minuteurs et redessine l'écran.
+var MODE_TEST = param("test") === "1";
+if (MODE_TEST) {
+  REGLAGES.rafraichissementMinutes = 2;
+  setInterval(function () {
+    var t = document.getElementById("tic");
+    if (t) t.innerHTML = horloge(new Date());
+  }, 60 * 1000);
 }
 
 charger();
