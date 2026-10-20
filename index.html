@@ -29,6 +29,8 @@
   .grille .petit { font-size: 16px; }
   .erreur { font-size: 22px; border: 3px solid #000; padding: 12px; }
   .pied { font-size: 15px; margin-top: 14px; color: #333; }
+  .icone { display: block; margin: 0 auto; }
+  .grille td { padding: 4px 2px; }
 </style>
 </head>
 <body>
@@ -129,6 +131,61 @@ function afficherErreur(msg) {
     '<br>Nouvel essai dans 5 minutes.</div>' + piedDePage();
 }
 
+// ================== ICÔNES ==================
+// Dessins SVG en noir et blanc (64×64), affichés via <img> pour rester compatibles
+// avec le vieux navigateur de la Kobo.
+var TRAIT = 'fill="none" stroke="#000" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"';
+var NUAGE = '<path d="M20 44 H48 A9 9 0 0 0 48 26 A13 13 0 0 0 23 23 A10.5 10.5 0 0 0 20 44 Z" ' +
+            'fill="#fff" stroke="#000" stroke-width="4" stroke-linejoin="round"/>';
+
+function soleil(cx, cy, r) {
+  var s = '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" ' + TRAIT + '/>';
+  for (var a = 0; a < 8; a++) {
+    var ang = a * Math.PI / 4, c = Math.cos(ang), si = Math.sin(ang);
+    s += '<line x1="' + (cx + c * (r + 5)) + '" y1="' + (cy + si * (r + 5)) +
+         '" x2="' + (cx + c * (r + 11)) + '" y2="' + (cy + si * (r + 11)) + '" ' + TRAIT + '/>';
+  }
+  return s;
+}
+function lune(dx, dy, k) {
+  return '<g transform="translate(' + dx + ' ' + dy + ') scale(' + k + ')">' +
+         '<path d="M38 12 A20 20 0 1 0 54 42 A16 16 0 1 1 38 12 Z" ' + TRAIT + '/></g>';
+}
+function nuageHaut() { return '<g transform="translate(0 -8)">' + NUAGE + '</g>'; }
+
+function dessin(code, nuit) {
+  // Ciel dégagé
+  if (code === 0 || code === 1) return nuit ? lune(0, 0, 1) : soleil(32, 32, 12);
+  // Partiellement nuageux
+  if (code === 2) return (nuit ? lune(-6, -4, 0.75) : soleil(22, 22, 8)) +
+                         '<g transform="translate(6 6)">' + NUAGE + '</g>';
+  // Couvert
+  if (code === 3) return '<g transform="translate(0 2)">' + NUAGE + '</g>';
+  // Brouillard
+  if (code === 45 || code === 48) return '<path d="M10 22 H46 M18 32 H54 M10 42 H46 M18 52 H54" ' + TRAIT + '/>';
+  // Bruine
+  if (code >= 51 && code <= 57) return nuageHaut() +
+    '<path d="M24 46 v2 M34 46 v2 M44 46 v2 M29 54 v2 M39 54 v2" ' + TRAIT + '/>';
+  // Pluie et averses
+  if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) return nuageHaut() +
+    '<path d="M24 44 l-4 10 M34 44 l-4 10 M44 44 l-4 10" ' + TRAIT + '/>';
+  // Neige
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return nuageHaut() +
+    '<path d="M22 46 v8 M18 50 h8 M34 50 v8 M30 54 h8 M46 46 v8 M42 50 h8" ' + TRAIT + '/>';
+  // Orage
+  if (code >= 95) return nuageHaut() +
+    '<polygon points="35,38 25,52 32,52 28,62 42,46 35,46 39,38" fill="#000"/>';
+  return '';
+}
+
+function icone(code, nuit, taille) {
+  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + taille + '" height="' + taille +
+            '" viewBox="0 0 64 64">' + dessin(code, nuit) + '</svg>';
+  return '<img class="icone" width="' + taille + '" height="' + taille + '" alt="' + libelleCourt(code) +
+         '" src="data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg) + '">';
+}
+// ============================================
+
 // Diagnostic : nombre de chargements depuis l'ouverture de la page
 var compteur = 0;
 var prochain = null;
@@ -142,11 +199,24 @@ function piedDePage() {
          '</p>';
 }
 
+// Plutôt qu'un seul minuteur d'une heure (que la Kobo peut « oublier »),
+// on vérifie chaque minute si l'heure du prochain chargement est passée.
+var enCours = false;
 function planifier(minutes) {
-  if (window._minuteur) clearTimeout(window._minuteur);
+  enCours = false;
   prochain = new Date(new Date().getTime() + minutes * 60 * 1000);
-  window._minuteur = setTimeout(charger, minutes * 60 * 1000);
 }
+setInterval(function () {
+  if (MODE_TEST) {
+    var t = document.getElementById("tic");
+    if (t) t.innerHTML = horloge(new Date());
+  }
+  var maintenant = new Date().getTime();
+  // Sécurité : un chargement bloqué depuis plus de 5 minutes est relancé
+  if (enCours && maintenant - debutChargement > 5 * 60 * 1000) enCours = false;
+  if (!enCours && prochain && maintenant >= prochain.getTime()) charger();
+}, 60 * 1000);
+var debutChargement = 0;
 
 function afficher(d) {
   var c = d.current, h = d.hourly, j = d.daily;
@@ -162,7 +232,8 @@ function afficher(d) {
 
   // Conditions actuelles
   html += '<table class="actuel"><tr>';
-  html += '<td style="width:45%"><span class="temp">' + arrondi(c.temperature_2m) + '°</span></td>';
+  html += '<td style="width:120px">' + icone(c.weather_code, c.is_day === 0, 110) + '</td>';
+  html += '<td style="width:36%"><span class="temp">' + arrondi(c.temperature_2m) + '°</span></td>';
   html += '<td><div class="etat">' + libelle(c.weather_code) + '</div>';
   html += '<div class="details">Ressenti ' + arrondi(c.apparent_temperature) + '°<br>';
   html += 'Vent ' + arrondi(c.wind_speed_10m) + ' km/h ' + directionVent(c.wind_direction_10m) + '<br>';
@@ -187,9 +258,9 @@ function afficher(d) {
   for (var k = 0; k < 6; k++) { if (debut + k * 2 < h.time.length) idx.push(debut + k * 2); }
   for (k = 0; k < idx.length; k++) html += '<th>' + decoupe(h.time[idx[k]]).h + 'h</th>';
   html += '</tr><tr>';
-  for (k = 0; k < idx.length; k++) html += '<td class="gros">' + arrondi(h.temperature_2m[idx[k]]) + '°</td>';
+  for (k = 0; k < idx.length; k++) html += '<td>' + icone(h.weather_code[idx[k]], h.is_day[idx[k]] === 0, 52) + '</td>';
   html += '</tr><tr>';
-  for (k = 0; k < idx.length; k++) html += '<td class="petit">' + libelleCourt(h.weather_code[idx[k]]) + '</td>';
+  for (k = 0; k < idx.length; k++) html += '<td class="gros">' + arrondi(h.temperature_2m[idx[k]]) + '°</td>';
   html += '</tr><tr>';
   for (k = 0; k < idx.length; k++) html += '<td class="petit">' + (h.precipitation_probability[idx[k]] || 0) + ' %</td>';
   html += '</tr></table>';
@@ -199,12 +270,12 @@ function afficher(d) {
   html += '<h2>Prochains jours</h2><table class="grille"><tr>';
   for (k = 1; k < j.time.length; k++) html += '<th>' + JOURS_COURTS[jourSemaine(decoupe(j.time[k]))] + '</th>';
   html += '</tr><tr>';
+  for (k = 1; k < j.time.length; k++) html += '<td>' + icone(j.weather_code[k], false, 60) + '</td>';
+  html += '</tr><tr>';
   for (k = 1; k < j.time.length; k++) {
     html += '<td><span class="gros">' + arrondi(j.temperature_2m_max[k]) + '°</span><br>' +
             arrondi(j.temperature_2m_min[k]) + '°</td>';
   }
-  html += '</tr><tr>';
-  for (k = 1; k < j.time.length; k++) html += '<td class="petit">' + libelleCourt(j.weather_code[k]) + '</td>';
   html += '</tr><tr>';
   for (k = 1; k < j.time.length; k++) html += '<td class="petit">' + (j.precipitation_probability_max[k] || 0) + ' %</td>';
   html += '</tr></table>';
@@ -219,14 +290,17 @@ function capitale(s) { return s.charAt(0).toUpperCase() + s.substr(1); }
 function chargerMeteo() {
   var url = "https://api.open-meteo.com/v1/forecast" +
     "?latitude=" + REGLAGES.lat + "&longitude=" + REGLAGES.lon +
-    "&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m" +
-    "&hourly=temperature_2m,weather_code,precipitation_probability" +
+    "&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,is_day" +
+    "&hourly=temperature_2m,weather_code,precipitation_probability,is_day" +
     "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset" +
     "&timezone=auto&forecast_days=5";
   requete(url, afficher, afficherErreur);
 }
 
 function charger() {
+  enCours = true;
+  debutChargement = new Date().getTime();
+  prochain = new Date(debutChargement + 5 * 60 * 1000); // remplacé dès que le chargement aboutit
   compteur++;
   var ville = param("ville");
   if (param("lat") && param("lon")) {
@@ -254,13 +328,7 @@ function charger() {
 // Mode test (?test=1) : mise à jour toutes les 2 minutes et horloge qui avance chaque minute,
 // pour vérifier que la Kobo exécute bien les minuteurs et redessine l'écran.
 var MODE_TEST = param("test") === "1";
-if (MODE_TEST) {
-  REGLAGES.rafraichissementMinutes = 2;
-  setInterval(function () {
-    var t = document.getElementById("tic");
-    if (t) t.innerHTML = horloge(new Date());
-  }, 60 * 1000);
-}
+if (MODE_TEST) REGLAGES.rafraichissementMinutes = 2;
 
 charger();
 </script>
