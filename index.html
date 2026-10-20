@@ -132,57 +132,25 @@ function afficherErreur(msg) {
 }
 
 // ================== ICÔNES ==================
-// Dessins SVG en noir et blanc (64×64), affichés via <img> pour rester compatibles
-// avec le vieux navigateur de la Kobo.
-var TRAIT = 'fill="none" stroke="#000" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"';
-var NUAGE = '<path d="M20 44 H48 A9 9 0 0 0 48 26 A13 13 0 0 0 23 23 A10.5 10.5 0 0 0 20 44 Z" ' +
-            'fill="#fff" stroke="#000" stroke-width="4" stroke-linejoin="round"/>';
-
-function soleil(cx, cy, r) {
-  var s = '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" ' + TRAIT + '/>';
-  for (var a = 0; a < 8; a++) {
-    var ang = a * Math.PI / 4, c = Math.cos(ang), si = Math.sin(ang);
-    s += '<line x1="' + (cx + c * (r + 5)) + '" y1="' + (cy + si * (r + 5)) +
-         '" x2="' + (cx + c * (r + 11)) + '" y2="' + (cy + si * (r + 11)) + '" ' + TRAIT + '/>';
-  }
-  return s;
-}
-function lune(dx, dy, k) {
-  return '<g transform="translate(' + dx + ' ' + dy + ') scale(' + k + ')">' +
-         '<path d="M38 12 A20 20 0 1 0 54 42 A16 16 0 1 1 38 12 Z" ' + TRAIT + '/></g>';
-}
-function nuageHaut() { return '<g transform="translate(0 -8)">' + NUAGE + '</g>'; }
-
-function dessin(code, nuit) {
-  // Ciel dégagé
-  if (code === 0 || code === 1) return nuit ? lune(0, 0, 1) : soleil(32, 32, 12);
-  // Partiellement nuageux
-  if (code === 2) return (nuit ? lune(-6, -4, 0.75) : soleil(22, 22, 8)) +
-                         '<g transform="translate(6 6)">' + NUAGE + '</g>';
-  // Couvert
-  if (code === 3) return '<g transform="translate(0 2)">' + NUAGE + '</g>';
-  // Brouillard
-  if (code === 45 || code === 48) return '<path d="M10 22 H46 M18 32 H54 M10 42 H46 M18 52 H54" ' + TRAIT + '/>';
-  // Bruine
-  if (code >= 51 && code <= 57) return nuageHaut() +
-    '<path d="M24 46 v2 M34 46 v2 M44 46 v2 M29 54 v2 M39 54 v2" ' + TRAIT + '/>';
-  // Pluie et averses
-  if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) return nuageHaut() +
-    '<path d="M24 44 l-4 10 M34 44 l-4 10 M44 44 l-4 10" ' + TRAIT + '/>';
-  // Neige
-  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return nuageHaut() +
-    '<path d="M22 46 v8 M18 50 h8 M34 50 v8 M30 54 h8 M46 46 v8 M42 50 h8" ' + TRAIT + '/>';
-  // Orage
-  if (code >= 95) return nuageHaut() +
-    '<polygon points="35,38 25,52 32,52 28,62 42,46 35,46 39,38" fill="#000"/>';
-  return '';
+// Images PNG (128×128) placées à côté de la page : ic-soleil.png, ic-pluie.png…
+// Le navigateur de la Kobo n'affiche pas le SVG, d'où le choix du PNG.
+function nomIcone(code, nuit) {
+  if (code === 0 || code === 1) return nuit ? "lune" : "soleil";
+  if (code === 2) return nuit ? "eclaircies_nuit" : "eclaircies";
+  if (code === 3) return "couvert";
+  if (code === 45 || code === 48) return "brouillard";
+  if (code >= 51 && code <= 57) return "bruine";
+  if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) return "pluie";
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return "neige";
+  if (code >= 95) return "orage";
+  return null;
 }
 
 function icone(code, nuit, taille) {
-  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + taille + '" height="' + taille +
-            '" viewBox="0 0 64 64">' + dessin(code, nuit) + '</svg>';
+  var nom = nomIcone(code, nuit);
+  if (!nom) return '<span class="petit">' + libelleCourt(code) + '</span>';
   return '<img class="icone" width="' + taille + '" height="' + taille + '" alt="' + libelleCourt(code) +
-         '" src="data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg) + '">';
+         '" src="ic-' + nom + '.png">';
 }
 // ============================================
 
