@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Secours : recharge la page toutes les heures même si le JavaScript échoue -->
+<meta http-equiv="refresh" content="3600">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<title>Météo</title>
+<style>
+  /* Styles volontairement simples : le navigateur Kobo est un vieux WebKit */
+  html, body { margin: 0; padding: 0; background: #fff; color: #000; }
+  body { font-family: Georgia, "Times New Roman", serif; padding: 16px 20px; }
+  h1 { font-size: 34px; margin: 0; }
+  .sous-titre { font-size: 20px; margin: 4px 0 0 0; }
+  .maj { font-size: 16px; color: #333; margin-top: 2px; }
+  hr { border: 0; border-top: 3px solid #000; margin: 14px 0; }
+  table { border-collapse: collapse; width: 100%; }
+  .actuel td { vertical-align: middle; }
+  .temp { font-size: 96px; font-weight: bold; line-height: 1; white-space: nowrap; }
+  .etat { font-size: 30px; font-weight: bold; }
+  .details { font-size: 21px; line-height: 1.5; }
+  h2 { font-size: 22px; margin: 0 0 8px 0; text-transform: uppercase; letter-spacing: 1px; }
+  .grille td, .grille th { border: 2px solid #000; text-align: center; padding: 6px 2px; }
+  .grille th { font-size: 19px; background: #000; color: #fff; }
+  .grille td { font-size: 21px; }
+  .grille .gros { font-size: 28px; font-weight: bold; }
+  .grille .petit { font-size: 16px; }
+  .erreur { font-size: 22px; border: 3px solid #000; padding: 12px; }
+</style>
+</head>
+<body>
+<div id="contenu"><p class="details">Chargement de la météo…</p></div>
+
+<script>
+/* ================== RÉGLAGES ==================
+   Par défaut : Paris. Pour changer de ville, soit modifier les valeurs ci-dessous,
+   soit ajouter à l'adresse : ?ville=Lyon   ou   ?lat=45.76&lon=4.84&nom=Lyon      */
+var REGLAGES = {
+  nom: "Paris",
+  lat: 48.8566,
+  lon: 2.3522,
+  rafraichissementMinutes: 60
+};
+/* ============================================== */
+
+var JOURS = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
+var JOURS_COURTS = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
+var MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet",
+            "août", "septembre", "octobre", "novembre", "décembre"];
+
+// Codes météo WMO utilisés par Open-Meteo
+var CODES = {
+  0: "Ciel dégagé", 1: "Plutôt dégagé", 2: "Partiellement nuageux", 3: "Couvert",
+  45: "Brouillard", 48: "Brouillard givrant",
+  51: "Bruine légère", 53: "Bruine", 55: "Bruine forte",
+  56: "Bruine verglaçante", 57: "Bruine verglaçante",
+  61: "Pluie faible", 63: "Pluie", 65: "Forte pluie",
+  66: "Pluie verglaçante", 67: "Pluie verglaçante",
+  71: "Neige faible", 73: "Neige", 75: "Forte neige", 77: "Grains de neige",
+  80: "Averses", 81: "Averses", 82: "Fortes averses",
+  85: "Averses de neige", 86: "Averses de neige",
+  95: "Orage", 96: "Orage et grêle", 99: "Orage et grêle"
+};
+// Version courte pour les tableaux
+var CODES_COURTS = {
+  0: "Dégagé", 1: "Dégagé", 2: "Éclaircies", 3: "Couvert", 45: "Brume", 48: "Brume",
+  51: "Bruine", 53: "Bruine", 55: "Bruine", 56: "Verglas", 57: "Verglas",
+  61: "Pluie", 63: "Pluie", 65: "Pluie", 66: "Verglas", 67: "Verglas",
+  71: "Neige", 73: "Neige", 75: "Neige", 77: "Neige",
+  80: "Averses", 81: "Averses", 82: "Averses", 85: "Neige", 86: "Neige",
+  95: "Orage", 96: "Orage", 99: "Orage"
+};
+
+function libelle(code) { return CODES[code] || "—"; }
+function libelleCourt(code) { return CODES_COURTS[code] || "—"; }
+function arrondi(x) { return Math.round(x); }
+function deux(n) { return (n < 10 ? "0" : "") + n; }
+
+function param(nom) {
+  var m = new RegExp("[?&]" + nom + "=([^&]*)").exec(window.location.search);
+  return m ? decodeURIComponent(m[1].replace(/\+/g, " ")) : null;
+}
+
+// Les heures renvoyées par l'API sont en heure locale, au format "2026-10-20T14:00".
+// On les découpe à la main pour ne pas dépendre du fuseau du navigateur Kobo.
+function decoupe(iso) {
+  return {
+    a: parseInt(iso.substr(0, 4), 10),
+    m: parseInt(iso.substr(5, 2), 10),
+    j: parseInt(iso.substr(8, 2), 10),
+    h: iso.length > 10 ? parseInt(iso.substr(11, 2), 10) : 0,
+    min: iso.length > 13 ? parseInt(iso.substr(14, 2), 10) : 0
+  };
+}
+function jourSemaine(d) { return new Date(d.a, d.m - 1, d.j).getDay(); }
+
+function directionVent(deg) {
+  var dirs = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"];
+  return dirs[Math.round(deg / 45) % 8];
+}
+
+function requete(url, ok, ko) {
+  var xhr = new XMLHttpRequest();
+  // Paramètre anti-cache
+  url += (url.indexOf("?") < 0 ? "?" : "&") + "_t=" + new Date().getTime();
+  xhr.open("GET", url, true);
+  xhr.timeout = 30000;
+  xhr.onreadystatechange = function () {
+    if (xhr.readyState !== 4) return;
+    if (xhr.status === 200) {
+      try { ok(JSON.parse(xhr.responseText)); }
+      catch (e) { ko("Réponse illisible"); }
+    } else {
+      ko("Erreur réseau (" + xhr.status + ")");
+    }
+  };
+  xhr.ontimeout = function () { ko("Délai dépassé"); };
+  xhr.send(null);
+}
+
+function afficherErreur(msg) {
+  document.getElementById("contenu").innerHTML =
+    '<h1>' + REGLAGES.nom + '</h1><hr>' +
+    '<div class="erreur">Météo indisponible : ' + msg +
+    '<br>Nouvel essai dans 5 minutes.</div>';
+  planifier(5);
+}
+
+function planifier(minutes) {
+  if (window._minuteur) clearTimeout(window._minuteur);
+  window._minuteur = setTimeout(charger, minutes * 60 * 1000);
+}
+
+function afficher(d) {
+  var c = d.current, h = d.hourly, j = d.daily;
+  var maintenant = decoupe(c.time);
+  var html = "";
+
+  // En-tête
+  html += '<h1>' + REGLAGES.nom + '</h1>';
+  html += '<p class="sous-titre">' + capitale(JOURS[jourSemaine(maintenant)]) + ' ' +
+          maintenant.j + ' ' + MOIS[maintenant.m - 1] + '</p>';
+  html += '<p class="maj">Mis à jour à ' + deux(maintenant.h) + 'h' + deux(maintenant.min) + '</p>';
+  html += '<hr>';
+
+  // Conditions actuelles
+  html += '<table class="actuel"><tr>';
+  html += '<td style="width:45%"><span class="temp">' + arrondi(c.temperature_2m) + '°</span></td>';
+  html += '<td><div class="etat">' + libelle(c.weather_code) + '</div>';
+  html += '<div class="details">Ressenti ' + arrondi(c.apparent_temperature) + '°<br>';
+  html += 'Vent ' + arrondi(c.wind_speed_10m) + ' km/h ' + directionVent(c.wind_direction_10m) + '<br>';
+  html += 'Humidité ' + arrondi(c.relative_humidity_2m) + ' %</div></td>';
+  html += '</tr></table>';
+  html += '<p class="details" style="margin:10px 0 0 0">Aujourd\'hui : ' +
+          arrondi(j.temperature_2m_min[0]) + '° / <b>' + arrondi(j.temperature_2m_max[0]) + '°</b>' +
+          ' · pluie ' + (j.precipitation_probability_max[0] || 0) + ' %' +
+          ' · soleil ' + heure(j.sunrise[0]) + ' – ' + heure(j.sunset[0]) + '</p>';
+  html += '<hr>';
+
+  // Prochaines heures : toutes les 2 h sur 12 h
+  var debut = 0;
+  for (var i = 0; i < h.time.length; i++) {
+    var t = decoupe(h.time[i]);
+    if (t.a === maintenant.a && t.m === maintenant.m && t.j === maintenant.j && t.h === maintenant.h) {
+      debut = i + 1; break;
+    }
+  }
+  html += '<h2>Prochaines heures</h2><table class="grille"><tr>';
+  var idx = [];
+  for (var k = 0; k < 6; k++) { if (debut + k * 2 < h.time.length) idx.push(debut + k * 2); }
+  for (k = 0; k < idx.length; k++) html += '<th>' + decoupe(h.time[idx[k]]).h + 'h</th>';
+  html += '</tr><tr>';
+  for (k = 0; k < idx.length; k++) html += '<td class="gros">' + arrondi(h.temperature_2m[idx[k]]) + '°</td>';
+  html += '</tr><tr>';
+  for (k = 0; k < idx.length; k++) html += '<td class="petit">' + libelleCourt(h.weather_code[idx[k]]) + '</td>';
+  html += '</tr><tr>';
+  for (k = 0; k < idx.length; k++) html += '<td class="petit">' + (h.precipitation_probability[idx[k]] || 0) + ' %</td>';
+  html += '</tr></table>';
+  html += '<hr>';
+
+  // Prochains jours
+  html += '<h2>Prochains jours</h2><table class="grille"><tr>';
+  for (k = 1; k < j.time.length; k++) html += '<th>' + JOURS_COURTS[jourSemaine(decoupe(j.time[k]))] + '</th>';
+  html += '</tr><tr>';
+  for (k = 1; k < j.time.length; k++) {
+    html += '<td><span class="gros">' + arrondi(j.temperature_2m_max[k]) + '°</span><br>' +
+            arrondi(j.temperature_2m_min[k]) + '°</td>';
+  }
+  html += '</tr><tr>';
+  for (k = 1; k < j.time.length; k++) html += '<td class="petit">' + libelleCourt(j.weather_code[k]) + '</td>';
+  html += '</tr><tr>';
+  for (k = 1; k < j.time.length; k++) html += '<td class="petit">' + (j.precipitation_probability_max[k] || 0) + ' %</td>';
+  html += '</tr></table>';
+
+  document.getElementById("contenu").innerHTML = html;
+  planifier(REGLAGES.rafraichissementMinutes);
+}
+
+function heure(iso) { var t = decoupe(iso); return deux(t.h) + 'h' + deux(t.min); }
+function capitale(s) { return s.charAt(0).toUpperCase() + s.substr(1); }
+
+function chargerMeteo() {
+  var url = "https://api.open-meteo.com/v1/forecast" +
+    "?latitude=" + REGLAGES.lat + "&longitude=" + REGLAGES.lon +
+    "&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m" +
+    "&hourly=temperature_2m,weather_code,precipitation_probability" +
+    "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset" +
+    "&timezone=auto&forecast_days=5";
+  requete(url, afficher, afficherErreur);
+}
+
+function charger() {
+  var ville = param("ville");
+  if (param("lat") && param("lon")) {
+    REGLAGES.lat = parseFloat(param("lat"));
+    REGLAGES.lon = parseFloat(param("lon"));
+    REGLAGES.nom = param("nom") || REGLAGES.nom;
+    chargerMeteo();
+  } else if (ville) {
+    // Recherche des coordonnées de la ville
+    requete("https://geocoding-api.open-meteo.com/v1/search?count=1&language=fr&name=" +
+            encodeURIComponent(ville),
+      function (g) {
+        if (!g.results || !g.results.length) { afficherErreur("ville « " + ville + " » introuvable"); return; }
+        REGLAGES.lat = g.results[0].latitude;
+        REGLAGES.lon = g.results[0].longitude;
+        REGLAGES.nom = g.results[0].name;
+        chargerMeteo();
+      },
+      afficherErreur);
+  } else {
+    chargerMeteo();
+  }
+}
+
+charger();
+</script>
+</body>
+</html>
